@@ -1,0 +1,297 @@
+# load series and platform data from GEO
+
+library(Biobase)
+library(GEOquery)
+library(limma)
+
+################################################################
+# load series and platform data from GEO
+
+gset <- getGEO("GSE93798", GSEMatrix =TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL22945", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+# make proper column names to match toptable 
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+
+# group names for all samples
+gsms <- "000000000000000000000011111111111111111111"
+sml <- c()
+for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+
+# log2 transform
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+  (qx[6]-qx[1] > 50 && qx[2] > 0) ||
+  (qx[2] > 0 && qx[2] < 1 && qx[4] > 1 && qx[4] < 2)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+exprs(gset) <- log2(ex) }
+
+# set up the data and proceed with analysis
+sml <- paste("G", sml, sep="")    # set group names
+fl <- as.factor(sml)
+gset$description <- fl
+design <- model.matrix(~ description + 0, gset)
+colnames(design) <- levels(fl)
+fit <- lmFit(gset, design)
+cont.matrix <- makeContrasts(G1-G0, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+
+tT <- subset(tT, select=c("ID","adj.P.Val","P.Value","t","B","logFC","SPOT_ID"))
+write.table(tT, file=stdout(), row.names=F, sep="\t")
+
+########################################################################################################
+#   Boxplot for selected GEO samples (control vs. IgAN)
+########################################################################################################
+library(Biobase)
+library(GEOquery)
+
+# load series and platform data from GEO
+
+gset <- getGEO("GSE93798", GSEMatrix =TRUE, getGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL22945", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+# group names for all samples in a series
+gsms <- "000000000000000000000011111111111111111111"
+sml <- c()
+for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+sml <- paste("G", sml, sep="")  # set group names
+
+# order samples by group
+ex <- exprs(gset)[ , order(sml)]
+sml <- sml[order(sml)]
+fl <- as.factor(sml)
+labels <- c("control","IgAN")
+
+# set parameters and draw the plot
+palette(c("#dfeaf4","#f4dfdf", "#AABBCC"))
+par(mar=c(2+round(max(nchar(sampleNames(gset)))/2),4,2,1))
+title <- paste ("GSE93798", '/', annotation(gset), " selected samples", sep ='')
+boxplot(ex, boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=fl)
+legend("topleft", labels, fill=palette(), bty="n")
+
+########################################################################################################
+# FIG. 1 VOLCANO PLOT
+########################################################################################################
+#valor de P significativo
+pval <- 0.05 
+
+#valor logFC umbral
+logFC <- 2
+
+Vol3<- volcanoplot(fit2, style = "p-value", highlight = 6, names=fit2$genes$Symbol, hl.col = "red", xlab="log2(fold-change)", ylab="-log10(adjusted p-value)",
+                   pch=20, cex=0.3,  xlim = c(-7,3)) 
+abline(v=0)
+abline(v=log2(logFC), col="red")
+abline(v=-log2(logFC), col="blue")
+abline(h=-log10(pval), col="orange")
+
+
+Vol3
+
+########################################################################################################
+##TOTAL DE GENES EXPRESADOS DIFERENCIALMENTE
+########################################################################################################
+DEGs1<-topTable(fit2, nrow(fit2), coef = NULL, genelist = fit2$genes, lfc=log2(2.0), p.value = 0.05)
+dim(DEGs1) #348 genes
+
+DEGs<-topTable(fit2, number=348, sort.by="logFC") #DEGs = 348
+DEGs
+
+z<-DEGs$logFC>0 #genes con logFC positivo
+as.vector(z)
+
+up_reg <- which(z==TRUE) #cumplen la condicion z = logFC positivo
+length(up_reg) #up-regulated = 107
+
+down_reg <- which(z==FALSE) ##no cumplen la condicion z = logFC negativo
+length(down_reg) #down-regulated = 241
+
+########################################################################################################
+################## para ver todos los genes DEG #####################
+
+gen<-topTable(fit2,nrow(fit2),coef=NULL,genelist=fit2$genes,lfc=log2(2.0), p.value=0.05) ## establecemos los parametros de 
+                                        # LogFC y P que queremos tengan los genes que tomaremos como diferencialmente expresados 
+dim(gen) # para ver cuantos son
+head(gen) # para tener una vista previa de lo que contiene el objeto 
+gen$Symbol->nombres ## obtencion del nombre común de los genes ##query name 
+list(nombres) ## para ver los nombres 
+gen$logFC->Lfc ## para tener los valores de LogFC de los genes DEG en un solo objeto 
+Lfc ## LogFC genes
+sort(Lfc, decreasing = TRUE) ## para verlos de mayor a menor
+
+## Los objetos nombres y Lfc se utilizaron para obtener los datos necesarios para crear la red de genes sub y sobre expresados 
+
+
+## Para obtener a los mejores 200 genes diferencialmente expresados
+gen200<-topTable(fit2,number=200,coef=NULL,genelist=fit2$genes,lfc=log2(2.0), p.value=0.05)
+head(gen200)
+gen200$ID->genesDEG ## para tener los ID's de los 200 genes que nos interesan en un objeto
+genesDEG ## objeto con el ID de los 200 genes 
+
+as.matrix(gset)->mm ## para hacer una matriz con los perfiles de expresion de todos los genes
+rownames(mm) ## para ver que los nombres de las filas de la matriz son los ID de los genes
+View(mm) ## para ver la matriz de todas los genes 
+
+########################################################################################################
+# FIG 2. HEATMAP
+########################################################################################################
+
+library(gplots)
+library(heatmap.plus)
+library(RColorBrewer)
+library(pheatmap)
+
+## necesitamos separar los 200 mejores genes de la matriz de todos sin que los datos pierdan el formato de matriz
+
+TodasMuestras <- mm ## objeto que contiene la matriz de todos los genes
+IDGEN200 <- genesDEG ## objeto que contiene los ID's de los 200 que nos interesan 
+matriz_200 <- matrix(data = NA, nrow = 200, ncol =42, byrow = TRUE, dimnames = list(IDGEN200)) ## matriz vacia con las dimensiones del objeto que deseamos obtener
+                                                            ## donde decimos que tome los nombres del objeto con los ID's de los 200 genes que queremos 
+
+for (x in 1:200) {elegidos<-which(rownames(TodasMuestras) == IDGEN200[x]) ## para x en 1 en 200 (tamaño de nuestra matriz vacia->lo que queremos)
+                                        ## cual de los renglones de todas las muestras es igual al nombre x del objeto IDGEN200
+TodasMuestras[elegidos,] ## para que de todas las muestras solo tome aquellas cuyo ID corresponde a las guardadas en el vector elegidos
+for (i in x:dim(matriz_200)[1]) { ## para que vaya llenando renglon por renglon de la matriz200 con
+  for (j in 1:dim(matriz_200)[2]) { ## los datos de expresion de los genes contenidos en el vector IDGEN200
+    matriz_200[i,j]=TodasMuestras[elegidos,j]}} ## para que la matriz quede llena con los valores de i y j 
+}
+
+
+## para determinar que muestras son control y cuales son de pacientes con IgAN en la matriz
+colnames(matriz_200) <- c("control", "control", "control", "control", "control", "control", "control",
+                 "control", "control", "control", "control", "control", "control", "control", "control", 
+                 "control", "control", "control", "control", "control", "control", "control",
+                 "IgAN", "IgAN", "IgAN","IgAN", "IgAN","IgAN","IgAN","IgAN","IgAN","IgAN", "IgAN","IgAN",
+                 "IgAN","IgAN","IgAN","IgAN","IgAN","IgAN","IgAN","IgAN") 
+
+colnames(matriz_200) ## para verificar que los nombres se hayan cambiado
+View(matriz_200) ## para ver la matriz con solo los 200 genes que nos interesan
+
+condition_colors <- unlist(lapply(colnames(matriz_200),function(x){ ## para escribir la anotacion del heatmap
+  if(grepl("control",x)) 'yellowgreen' ## si la columna tiene el nombre control entonces la anotacion sera color 'yellowgreen'
+  else if(grepl('IgAN',x)) 'purple4' ## si la columna tiene el nombre IgAN entonces la anotacion sera color 'purple4'
+}))
+
+heatmap.2(matriz_200, trace="none", density="none", col=bluered(20), cexRow=1, cexCol=0.2, margins = c(20,13), ## para hacer el heatmap
+          ColSideColors=condition_colors, scale="row") ## la escala debe ser 'row' porque ahi tenemos a nuestros genes diferencialmente expresados
+legend("topright",legend=c("Control","IgAN"),fill=c('yellowgreen','purple4'),cex=0.5) ## para que aparezca 
+                                                                            # la legenda con lo que representa cada color de la anotacion
+
+################ pretty heatmap
+
+sample = c("violetred3", "yellowgreen") ## para hacer la anotacion y asignarle colores 
+names(sample) = c("control", "IgAN") ## darle nombres 
+
+ann_colors = list(sample = sample) ## que sepa de donde sacar la informacion de la anotacion
+annotation = data.frame(sample = factor(rep(c("control", "IgAN"), each=20))) ## para que sepa cuanto espacio ocupa cada una
+
+pheatmap( matriz_200, ## para hacer el heatmap
+          show_rownames = FALSE, show_colnames = TRUE,
+          annotation = annotation,
+          annotation_colors = ann_colors, scale="row")
+          
+########################################################################################################
+# FIG.3 PCA
+########################################################################################################
+gset$description
+et <- gset$description
+pca <- princomp(exprs(gset),cor = FALSE, scores = TRUE)
+plot(pca$loadings, main = "Principal Component Analysis",
+     col = gset$description, pch = 19, cex = 1)
+text(pca$loadings, labels = et, pos=3, cex=0.8)
+
+########################################################################################################
+#GO Enrichment
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+#Obtención de los genes sub y sobre expresados
+DEGs <- topTable(fit2, number = nrow(fit2), coef = NULL, genelist = fit2$genes,
+                 lfc = log2 (2), p.value = 0.05, sort.by = "logFC")
+dim(DEGs)
+
+#Vector con los ID's de genes sobre expresados
+DEGs2 <- sort(DEGs$logFC, decreasing = TRUE)
+names(DEGs2) <- DEGs$ENTREZ_GENE_ID
+DEGs2
+class(DEGs2)
+View(DEGs2)
+DEGs3 <- DEGs2 [c(1:107)]
+View (DEGs3)
+DEGs3 <- names(DEGs3)
+DEGs3
+DEGs3 <- as.numeric(DEGs3)
+DEGs3_sobre <- sort(DEGs3, decreasing = TRUE)
+DEGs3_sobre
+
+########################################################################################################
+#FIG. 4a Enriquecimiento GO de genes sobre expresados
+########################################################################################################
+ego1 <- enrichGO(gene = DEGs3_sobre, OrgDb = org.Hs.eg.db, 
+                 ont = "BP", pAdjustMethod = "BH", pvalueCutoff  = 0.05)
+
+barplot(ego1, showCategory = 30, x = "Count", color = "pvalue", 
+        title = "Enriched GO Terms Biological Process (UP)")
+
+#Vector con ID's de genes sub expresados
+DEGs4 <- DEGs2 [c(108:348)]
+View(DEGs4)
+DEGs4 <- names(DEGs4)
+View(DEGs4)
+DEGs4 <- as.numeric(DEGs4)
+DEGs4_sub <- sort(DEGs4, decreasing = TRUE)
+DEGs4_sub
+########################################################################################################
+# FIG. 4b Enriquecimiento GO de genes sub expresados
+########################################################################################################
+ego2 <- enrichGO(gene = DEGs4_sub, OrgDb = org.Hs.eg.db, 
+                 ont = "BP", pAdjustMethod = "BH", pvalueCutoff  = 0.05)
+
+barplot(ego2, showCategory = 30, x = "Count", drop = TRUE, 
+        title = "Enriched GO Terms Biological Process (DOWN)")
+
+#Vector con los ID's de todos los genes diferencialmente expresados
+dim(DEGs)
+DEGs_T <- DEGs$ENTREZ_GENE_ID
+DEGs_T
+DEGs_T <- sort(DEGs_T, decreasing = TRUE)
+DEGs_T
+
+########################################################################################################
+#FIG. 5 Enriquecimiento de Vias
+########################################################################################################
+ego4 <- enrichKEGG(gene = DEGs_T, organism = "hsa", keyType = "ncbi-geneid",
+                   pAdjustMethod = "BH", pvalueCutoff  = 0.05)
+
+barplot(ego4, showCategory = 30, x = "Count", color = "pvalue", 
+        title = "Pathway Enrichment")
+        
+########################################################################################################
+##FIG 7.1 Términos GO enriquecidos de los genes del módulo
+########################################################################################################
+cg11<-read.csv("Central_genes_11.csv") #11 genes centrales (del modulo identif. con MCODE)
+View(cg11)
+
+gene_list2 <- cg11$ENTREZ_GENE_ID
+
+ego.11<-enrichGO(gene = gene_list2, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", pvalueCutoff = 0.05,
+                 pAdjustMethod = "BH", readable = TRUE,
+                 pool = TRUE) #GO functional analysis
+dotplot(ego.11)
+
+########################################################################################################
+##FIG 7.2 Términos KEGG enriquecidos de los genes del módulo
+########################################################################################################
+eKegg.11 <- enrichKEGG(gene = gene_list2, organism = "hsa", keyType = "ncbi-geneid",
+                       pAdjustMethod = "BH", pvalueCutoff  = 0.05) #KEGG functional analysis
+dotplot(eKegg.11)
+
+
+
+
+
